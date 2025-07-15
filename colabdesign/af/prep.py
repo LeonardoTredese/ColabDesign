@@ -31,7 +31,7 @@ class _af_prep:
         self._cfg.model.global_config.subbatch_size = 4
         self._model["fn"] = self._get_model(self._cfg)["fn"]
 
-    self._opt = copy_dict(self.opt)  
+    self._opt = copy_dict(self.opt)
     self.restart(**kwargs)
 
   def _prep_features(self, num_res, num_seq=None, num_templates=1):
@@ -54,11 +54,11 @@ class _af_prep:
       -repeat=True       - tie the repeating sequence within single chain
     -rm_template_seq     - if template is defined, remove information about template sequence
     -fix_pos="1,2-10"    - specify which positions to keep fixed in the sequence
-                           note: supervised loss is applied to all positions, use "partial" 
+                           note: supervised loss is applied to all positions, use "partial"
                            protocol to apply supervised loss to only subset of positions
     -ignore_missing=True - skip positions that have missing density (no CA coordinate)
     ---------------------------------------------------
-    '''    
+    '''
     # prep features
     self._pdb = prep_pdb(pdb_filename, chain=chain, ignore_missing=ignore_missing,
                          offsets=kwargs.pop("pdb_offsets",None),
@@ -70,15 +70,15 @@ class _af_prep:
     # feat dims
     num_seq = self._num
     res_idx = self._pdb["residue_index"]
-    
-    # get [pos]itions of interests    
+
+    # get [pos]itions of interests
     if fix_pos is not None and fix_pos != "":
       self._pos_info = prep_pos(fix_pos, **self._pdb["idx"])
       self.opt["fix_pos"] = self._pos_info["pos"]
 
     if homooligomer and chain is not None and copies == 1:
       copies = len(chain.split(","))
-      
+
     # repeat/homo-oligomeric support
     if copies > 1:
 
@@ -126,9 +126,9 @@ class _af_prep:
         rm[n][:] = x
     self.opt["template"]["rm_ic"] = rm_template_ic
     self._inputs.update(rm)
-  
+
     self._prep_model(**kwargs)
-    
+
   def _prep_hallucination(self, length=100, copies=1, repeat=False, **kwargs):
     '''
     prep inputs for hallucination
@@ -137,18 +137,18 @@ class _af_prep:
       -repeat=True - tie the repeating sequence within single chain
     ---------------------------------------------------
     '''
-    
+
     # define num copies (for repeats/ homo-oligomers)
     if not repeat and copies > 1 and not self._args["use_multimer"]:
       (num_seq, block_diag) = (self._num * copies + 1, True)
     else:
       (num_seq, block_diag) = (self._num, False)
-    
+
     self._args.update({"repeat":repeat,"block_diag":block_diag,"copies":copies})
-      
+
     # prep features
     self._len = length
-    
+
     # set weights
     self.opt["weights"].update({"con":1.0})
     if copies > 1:
@@ -165,7 +165,7 @@ class _af_prep:
     else:
       self._lengths = [self._len]
       res_idx = np.arange(length)
-    
+
     # configure input features
     self._inputs = self._prep_features(num_res=sum(self._lengths), num_seq=num_seq)
     self._inputs["residue_index"] = res_idx
@@ -174,18 +174,18 @@ class _af_prep:
     self._prep_model(**kwargs)
 
   def _prep_binder(self, pdb_filename,
-                   target_chain="A", binder_len=50,                                         
+                   target_chain="A", binder_len=50,
                    rm_target = False,
                    rm_target_seq = False,
                    rm_target_sc = False,
-                   
+
                    # if binder_chain is defined
                    binder_chain=None,
                    rm_binder=True,
                    rm_binder_seq=True,
                    rm_binder_sc=True,
                    rm_template_ic=False,
-                                      
+
                    hotspot=None, ignore_missing=True, **kwargs):
     '''
     prep inputs for binder design
@@ -202,13 +202,13 @@ class _af_prep:
     '''
     redesign = binder_chain is not None
     rm_binder = not kwargs.pop("use_binder_template", not rm_binder)
-    
+
     self._args.update({"redesign":redesign})
 
     # get pdb info
     target_chain = kwargs.pop("chain",target_chain) # backward comp
     chains = f"{target_chain},{binder_chain}" if redesign else target_chain
-    im = [True] * len(target_chain.split(",")) 
+    im = [True] * len(target_chain.split(","))
     if redesign: im += [ignore_missing] * len(binder_chain.split(","))
 
     self._pdb = prep_pdb(pdb_filename, chain=chains, ignore_missing=im)
@@ -221,7 +221,7 @@ class _af_prep:
       self._target_len = self._pdb["residue_index"].shape[0]
       self._binder_len = binder_len
       res_idx = np.append(res_idx, res_idx[-1] + np.arange(binder_len) + 50)
-    
+
     self._len = self._binder_len
     self._lengths = [self._target_len, self._binder_len]
 
@@ -260,7 +260,7 @@ class _af_prep:
         else:
           if m == "target": rm[n][:T] = y
           if m == "binder": rm[n][T:] = y
-        
+
     # set template [opt]ions
     self.opt["template"]["rm_ic"] = rm_template_ic
     self._inputs.update(rm)
@@ -273,7 +273,7 @@ class _af_prep:
                     rm_template=False,
                     rm_template_seq=False,
                     rm_template_sc=False,
-                    rm_template_ic=False, 
+                    rm_template_ic=False,
                     ignore_missing=True, **kwargs):
     '''
     prep input for partial hallucination
@@ -284,8 +284,8 @@ class _af_prep:
       -atoms_to_exclude=["N","C","O"] (for sc_rmsd loss, specify which atoms to exclude)
     -rm_template_seq - if template is defined, remove information about template sequence
     -ignore_missing=True - skip positions that have missing density (no CA coordinate)
-    ---------------------------------------------------    
-    '''    
+    ---------------------------------------------------
+    '''
     # prep features
     self._pdb = prep_pdb(pdb_filename, chain=chain, ignore_missing=ignore_missing,
                    offsets=kwargs.pop("pdb_offsets",None),
@@ -299,11 +299,11 @@ class _af_prep:
     # feat dims
     num_seq = self._num
     res_idx = np.arange(self._len)
-    
+
     # get [pos]itions of interests
     if pos is None:
       self.opt["pos"] = self._pdb["pos"] = np.arange(self._pdb["len"])
-      self._pos_info = {"length":np.array([self._pdb["len"]]), "pos":self._pdb["pos"]}    
+      self._pos_info = {"length":np.array([self._pdb["len"]]), "pos":self._pdb["pos"]}
     else:
       self._pos_info = prep_pos(pos, **self._pdb["idx"])
       self.opt["pos"] = self._pdb["pos"] = self._pos_info["pos"]
@@ -313,7 +313,7 @@ class _af_prep:
 
     # repeat/homo-oligomeric support
     if copies > 1:
-      
+
       if repeat or homooligomer:
         self._len = self._len // copies
         self._pdb["len"] = self._pdb["len"] // copies
@@ -341,11 +341,11 @@ class _af_prep:
     # configure input features
     self._inputs = self._prep_features(num_res=sum(self._lengths), num_seq=num_seq)
     self._inputs["residue_index"] = res_idx
-    self._inputs["batch"] = jax.tree_util.tree_map(lambda x:x[self._pdb["pos"]], self._pdb["batch"])     
+    self._inputs["batch"] = jax.tree_util.tree_map(lambda x:x[self._pdb["pos"]], self._pdb["batch"])
     self._inputs.update(get_multi_id(self._lengths, homooligomer=homooligomer))
 
     # configure options/weights
-    self.opt["weights"].update({"dgram_cce":1.0, "rmsd":0.0, "fape":0.0, "con":1.0}) 
+    self.opt["weights"].update({"dgram_cce":1.0, "rmsd":0.0, "fape":0.0, "con":1.0})
     self._wt_aatype = self._pdb["batch"]["aatype"][self.opt["pos"]]
 
     # configure sidechains
@@ -354,9 +354,9 @@ class _af_prep:
       self._sc = {"batch":prep_inputs.make_atom14_positions(self._inputs["batch"]),
                   "pos":get_sc_pos(self._wt_aatype, atoms_to_exclude)}
       self.opt["weights"].update({"sc_rmsd":0.1, "sc_fape":0.1})
-      self.opt["fix_pos"] = np.arange(self.opt["pos"].shape[0])      
+      self.opt["fix_pos"] = np.arange(self.opt["pos"].shape[0])
       self._wt_aatype_sub = self._wt_aatype
-      
+
     elif fix_pos is not None and fix_pos != "":
       sub_fix_pos = []
       sub_i = []
@@ -367,7 +367,7 @@ class _af_prep:
           sub_fix_pos.append(pos.index(i))
       self.opt["fix_pos"] = np.array(sub_fix_pos)
       self._wt_aatype_sub = self._pdb["batch"]["aatype"][sub_i]
-      
+
     elif kwargs.pop("fix_seq",False):
       self.opt["fix_pos"] = np.arange(self.opt["pos"].shape[0])
       self._wt_aatype_sub = self._wt_aatype
@@ -376,7 +376,7 @@ class _af_prep:
     self._inputs.update({"rm_template":     rm_template,
                          "rm_template_seq": rm_template_seq,
                          "rm_template_sc":  rm_template_sc})
-  
+
     self._prep_model(**kwargs)
 
 #######################
@@ -415,7 +415,7 @@ def prep_pdb(pdb_filename, chain=None,
   residue_idx, chain_idx = [],[]
   full_lengths = []
 
-  # go through each defined chain  
+  # go through each defined chain
   for n,chain in enumerate(chains):
     pdb_str = pdb_to_string(pdb_filename, chains=chain, models=[1])
     protein_obj = protein.from_pdb_string(pdb_str, chain_id=chain)
@@ -425,7 +425,7 @@ def prep_pdb(pdb_filename, chain=None,
              'residue_index': protein_obj.residue_index}
 
     cb_feat = add_cb(batch) # add in missing cb (in the case of glycine)
-    
+
     im = ignore_missing[n] if isinstance(ignore_missing,list) else ignore_missing
     if im:
       r = batch["all_atom_mask"][:,0] == 1
@@ -436,7 +436,7 @@ def prep_pdb(pdb_filename, chain=None,
       # pad values
       offset = 0 if offsets is None else (offsets[n] if isinstance(offsets,list) else offsets)
       r = offset + (protein_obj.residue_index - protein_obj.residue_index.min())
-      length = (r.max()+1) if lengths is None else (lengths[n] if isinstance(lengths,list) else lengths)    
+      length = (r.max()+1) if lengths is None else (lengths[n] if isinstance(lengths,list) else lengths)
       def scatter(x, value=0):
         shape = (length,) + x.shape[1:]
         y = np.full(shape, value, dtype=x.dtype)
@@ -447,21 +447,21 @@ def prep_pdb(pdb_filename, chain=None,
                "all_atom_positions":scatter(batch["all_atom_positions"]),
                "all_atom_mask":scatter(batch["all_atom_mask"]),
                "residue_index":scatter(batch["residue_index"],-1)}
-      
+
       residue_index = np.arange(length) + last
-    
+
     last = residue_index[-1] + 50
     o.append({"batch":batch,
               "residue_index": residue_index,
               "cb_feat":cb_feat})
-    
+
     residue_idx.append(batch.pop("residue_index"))
     chain_idx.append([chain] * len(residue_idx[-1]))
     full_lengths.append(len(residue_index))
 
   # concatenate chains
   o = jax.tree_util.tree_map(lambda *x:np.concatenate(x,0),*o)
-  
+
   # save original residue and chain index
   o["idx"] = {"residue":np.concatenate(residue_idx), "chain":np.concatenate(chain_idx)}
   o["lengths"] = full_lengths
@@ -476,7 +476,7 @@ def make_fixed_size(feat, num_res, num_seq=1, num_templates=1):
       shape_placeholders.NUM_MSA_SEQ: num_seq,
       shape_placeholders.NUM_EXTRA_SEQ: 1,
       shape_placeholders.NUM_TEMPLATES: num_templates
-  }  
+  }
   for k,v in feat.items():
     if k == "batch":
       feat[k] = make_fixed_size(v, num_res)
@@ -542,14 +542,14 @@ def prep_input_features(L, N=1, T=1, eN=1):
             # 1  = deletion_value
             # 23 = profile
             # 1  = deletion_mean_value
-  
+
             'seq_mask': np.ones(L),
             'msa_mask': np.ones((N,L)),
             'msa_row_mask': np.ones(N),
             'atom14_atom_exists': np.zeros((L,14)),
             'atom37_atom_exists': np.zeros((L,37)),
             'residx_atom14_to_atom37': np.zeros((L,14),int),
-            'residx_atom37_to_atom14': np.zeros((L,37),int),            
+            'residx_atom37_to_atom14': np.zeros((L,37),int),
             'residue_index': np.arange(L),
             'extra_deletion_value': np.zeros((eN,L)),
             'extra_has_deletion': np.zeros((eN,L)),

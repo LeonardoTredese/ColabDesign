@@ -11,179 +11,189 @@ from colabdesign.af.alphafold.common import confidence, residue_constants
 # AF_LOSS - setup loss function
 ####################################################
 
-class _af_loss:
-  # protocol specific loss functions
-  def _loss_fixbb(self, inputs, outputs, aux):
-    opt = inputs["opt"]
-    '''get losses'''
-    copies = self._args["copies"] if self._args["homooligomer"] else 1    
-    # rmsd loss
-    aln = get_rmsd_loss(inputs, outputs, copies=copies)
-    if self._args["realign"]:
-      aux["atom_positions"] = aln["align"](aux["atom_positions"]) * aux["atom_mask"][...,None]
-    
-    # supervised losses
-    aux["losses"].update({
-      "fape":      get_fape_loss(inputs, outputs, copies=copies, clamp=opt["fape_cutoff"]),
-      "dgram_cce": get_dgram_loss(inputs, outputs, copies=copies, aatype=inputs["aatype"]),
-      "rmsd":      aln["rmsd"],
-    })
-    
-    # unsupervised losses
-    self._loss_unsupervised(inputs, outputs, aux)
 
-  def _loss_binder(self, inputs, outputs, aux):
-    '''get losses'''
+############################################################################
+# functional, stateless helpers                                            #
+############################################################################
+
+def _loss_fixbb_f(inputs, outputs, cfg, aux):
+    opt = inputs["opt"]
+    copies = cfg["copies"] if cfg["homooligomer"] else 1
+    aln = get_rmsd_loss(inputs, outputs, copies=copies)
+    if cfg["realign"]:
+        aux["atom_positions"] = aln["align"](aux["atom_positions"]) * aux["atom_mask"][..., None]
+    aux["losses"].update({
+        "fape": get_fape_loss(inputs, outputs, copies=copies, clamp=opt["fape_cutoff"]),
+        "dgram_cce": get_dgram_loss(inputs, outputs, copies=copies, aatype=inputs["aatype"]),
+        "rmsd": aln["rmsd"],
+    })
+    _loss_unsup_f(inputs, outputs, cfg, aux)
+
+
+def _loss_binder_f(inputs, outputs, cfg, aux):
     opt = inputs["opt"]
     mask = inputs["seq_mask"]
     zeros = jnp.zeros_like(mask)
-    tL,bL = self._target_len, self._binder_len
-    binder_id = zeros.at[-bL:].set(mask[-bL:])
+    tL, bL = cfg["target_len"], cfg["binder_len"]
+    binder_id  = zeros.at[-bL:].set(mask[-bL:])
     if "hotspot" in opt:
-      target_id = zeros.at[opt["hotspot"]].set(mask[opt["hotspot"]])
-      i_con_loss = get_con_loss(inputs, outputs, opt["i_con"], mask_1d=target_id, mask_1b=binder_id)
+        target_id = zeros.at[opt["hotspot"]].set(mask[opt["hotspot"]])
     else:
-      target_id = zeros.at[:tL].set(mask[:tL])
-      i_con_loss = get_con_loss(inputs, outputs, opt["i_con"], mask_1d=binder_id, mask_1b=target_id)
-
-    # unsupervised losses
+        target_id = zeros.at[:tL].set(mask[:tL])
+    i_con = get_con_loss(inputs, outputs, opt["i_con"], mask_1d=target_id, mask_1b=binder_id)
     aux["losses"].update({
-      "plddt":   get_plddt_loss(outputs, mask_1d=binder_id), # plddt over binder
-      "exp_res": get_exp_res_loss(outputs, mask_1d=binder_id),
-      "pae":     get_pae_loss(outputs, mask_1d=binder_id), # pae over binder + interface
-      "con":     get_con_loss(inputs, outputs, opt["con"], mask_1d=binder_id, mask_1b=binder_id),
-      # interface
-      "i_con":   i_con_loss,
-      "i_pae":   get_pae_loss(outputs, mask_1d=binder_id, mask_1b=target_id),
+        "plddt": get_plddt_loss(outputs, mask_1d=binder_id),
+        "exp_res": get_exp_res_loss(outputs, mask_1d=binder_id),
+        "pae": get_pae_loss(outputs, mask_1d=binder_id),
+        "con": get_con_loss(inputs, outputs, opt["con"],
+                               mask_1d=binder_id, mask_1b=binder_id),
+        "i_con": i_con,
+        "i_pae": get_pae_loss(outputs, mask_1d=binder_id, mask_1b=target_id),
     })
 
-    # supervised losses
-    if self._args["redesign"]:      
-  
-      aln = get_rmsd_loss(inputs, outputs, L=tL, include_L=False)
-      align_fn = aln["align"]
-      
-      # compute cce of binder + interface
-      aatype = inputs["aatype"]
-      cce = get_dgram_loss(inputs, outputs, aatype=aatype, return_mtx=True)
-
-      # compute fape
-      fape = get_fape_loss(inputs, outputs, clamp=opt["fape_cutoff"], return_mtx=True)
-
-      aux["losses"].update({
-        "rmsd":      aln["rmsd"],
-        "dgram_cce": cce[-bL:].sum()  / (mask[-bL:].sum() + 1e-8),
-        "fape":      fape[-bL:].sum() / (mask[-bL:].sum() + 1e-8)
-      })
-
+    if cfg["redesign"]:
+        aln = get_rmsd_loss(inputs, outputs, L=tL, include_L=False)
+        aux["losses"]["rmsd"] = aln["rmsd"]
+        aatype = inputs["aatype"]
+        cce = get_dgram_loss(inputs, outputs, aatype=aatype, return_mtx=True)
+        fape = get_fape_loss(inputs, outputs, clamp=opt["fape_cutoff"], return_mtx=True)
+        aux["losses"].update({
+            "dgram_cce": cce[-bL:].sum() / (mask[-bL:].sum() + 1e-8),
+            "fape": fape[-bL:].sum() / (mask[-bL:].sum() + 1e-8),
+        })
+        align_fn = aln["align"]
     else:
-      align_fn = get_rmsd_loss(inputs, outputs, L=tL)["align"]
+        align_fn = get_rmsd_loss(inputs, outputs, L=tL)["align"]
 
-    if self._args["realign"]:
-      aux["atom_positions"] = align_fn(aux["atom_positions"]) * aux["atom_mask"][...,None]
+    if cfg["realign"]: aux["atom_positions"] = align_fn(aux["atom_positions"]) * aux["atom_mask"][..., None]
 
-  def _loss_partial(self, inputs, outputs, aux):
-    '''get losses'''    
+
+def _loss_partial_f(inputs, outputs, cfg, aux):
     opt = inputs["opt"]
     pos = opt["pos"]
-    if self._args["repeat"] or self._args["homooligomer"]:
-      C,L = self._args["copies"], self._len
-      pos = (jnp.repeat(pos,C).reshape(-1,C) + jnp.arange(C) * L).T.flatten()
-      
-    def sub(x, axis=0):
-      return jax.tree_util.tree_map(lambda y:jnp.take(y,pos,axis),x)
-    
-    copies = self._args["copies"] if self._args["homooligomer"] else 1
-    aatype = sub(inputs["aatype"])
-    dgram = {"logits":sub(sub(outputs["distogram"]["logits"]),1),
-             "bin_edges":outputs["distogram"]["bin_edges"]}
-    atoms = sub(outputs["structure_module"]["final_atom_positions"])
-    
-    I = {"aatype": aatype, "batch": inputs["batch"], "seq_mask":sub(inputs["seq_mask"])}
-    O = {"distogram": dgram, "structure_module": {"final_atom_positions": atoms}}
+    if cfg["repeat"] or cfg["homooligomer"]:
+        C, L0 = cfg["copies"], cfg["length"]
+        pos   = (jnp.repeat(pos, C).reshape(-1, C) + jnp.arange(C)*L0).T.flatten()
+    take = lambda x, ax=0: jax.tree_util.tree_map(lambda y: jnp.take(y, pos, ax), x)
+    copies = cfg["copies"] if cfg["homooligomer"] else 1
+    I = {"aatype": take(inputs["aatype"]),
+         "batch":  inputs["batch"],
+         "seq_mask": take(inputs["seq_mask"])}
+    O = {"distogram": {
+            "logits": take(take(outputs["distogram"]["logits"]), 1),
+            "bin_edges": outputs["distogram"]["bin_edges"]},
+         "structure_module": {
+            "final_atom_positions": take(
+                outputs["structure_module"]["final_atom_positions"])}}
     aln = get_rmsd_loss(I, O, copies=copies)
-
-    # supervised losses
     aux["losses"].update({
-      "dgram_cce": get_dgram_loss(I, O, copies=copies, aatype=I["aatype"]),
-      "fape":      get_fape_loss(I, O, copies=copies, clamp=opt["fape_cutoff"]),
-      "rmsd":      aln["rmsd"],
+        "dgram_cce": get_dgram_loss(I, O, copies=copies,
+                                    aatype=I["aatype"]),
+        "fape":      get_fape_loss(I, O, copies=copies,
+                                   clamp=opt["fape_cutoff"]),
+        "rmsd":      aln["rmsd"],
     })
-    
-    # unsupervised losses
-    self._loss_unsupervised(inputs, outputs, aux)
+    _loss_unsup_f(inputs, outputs, cfg, aux)
+    if cfg["use_sidechains"] and copies == 1:
+        struct = outputs["structure_module"]
+        pred_pos = take(struct["final_atom14_positions"])
+        true_pos = all_atom.atom37_to_atom14(inputs["batch"]["all_atom_positions"], cfg["sc"]["batch"])
+        aux["losses"]["sc_rmsd"] = _get_sc_rmsd_loss(true_pos, pred_pos, cfg["sc"]["pos"])["rmsd"]
+        if not cfg["use_multimer"]:
+            sc_struct = {**folding.compute_renamed_ground_truth(cfg["sc"]["batch"], pred_pos), "sidechains": {k: take(struct["sidechains"][k], 1) for k in ("frames", "atom_pos")}}
+            batch = {**inputs["batch"], **all_atom.atom37_to_frames(**inputs["batch"])}
+            aux["losses"]["sc_fape"] = folding.sidechain_loss(batch, sc_struct, cfg["sm_head_cfg"])["loss"]
+        else:
+            aux["losses"]["sc_fape"] = 0.0  # not supported yet
+    if cfg["realign"]:
+        aux["atom_positions"] = aln["align"](aux["atom_positions"]) * aux["atom_mask"][..., None]
 
-    # sidechain specific losses
-    if self._args["use_sidechains"] and copies == 1:
-    
-      struct = outputs["structure_module"]
-      pred_pos = sub(struct["final_atom14_positions"])
-      true_pos = all_atom.atom37_to_atom14(inputs["batch"]["all_atom_positions"], self._sc["batch"])
+def _loss_hallucination_f(inputs, outputs, cfg, aux):
+    _loss_unsup_f(inputs, outputs, cfg, aux)
 
-      # sc_rmsd
-      aln = _get_sc_rmsd_loss(true_pos, pred_pos, self._sc["pos"])
-      aux["losses"]["sc_rmsd"] = aln["rmsd"]
-      
-      # sc_fape
-      if not self._args["use_multimer"]:
-        sc_struct = {**folding.compute_renamed_ground_truth(self._sc["batch"], pred_pos),
-                     "sidechains":{k: sub(struct["sidechains"][k],1) for k in ["frames","atom_pos"]}}
-        batch =     {**inputs["batch"],
-                     **all_atom.atom37_to_frames(**inputs["batch"])}
-        aux["losses"]["sc_fape"] = folding.sidechain_loss(batch, sc_struct,
-          self._cfg.model.heads.structure_module)["loss"]
-
-      else:  
-        # TODO
-        print("ERROR: 'sc_fape' not currently supported for 'multimer' mode")
-        aux["losses"]["sc_fape"] = 0.0
-
-    # align final atoms
-    if self._args["realign"]:
-      aux["atom_positions"] = aln["align"](aux["atom_positions"]) * aux["atom_mask"][...,None]
-
-  def _loss_hallucination(self, inputs, outputs, aux):
-    # unsupervised losses
-    self._loss_unsupervised(inputs, outputs, aux)
-
-  def _loss_unsupervised(self, inputs, outputs, aux):
-
-    # define masks
+def _loss_unsup_f(inputs, outputs, cfg, aux):
     opt = inputs["opt"]
     if "pos" in opt:
-      C,L = self._args["copies"], self._len
-      pos = opt["pos"]
-      if C > 1: pos = (jnp.repeat(pos,C).reshape(-1,C) + jnp.arange(C) * L).T.flatten()
-      mask_1d = inputs["seq_mask"].at[pos].set(0)
+        pos = opt["pos"]
+        if cfg["copies"] > 1:
+            C, L0 = cfg["copies"], cfg["length"]
+            pos = (jnp.repeat(pos, C).reshape(-1, C) + jnp.arange(C)*L0).T.flatten()
+        mask_1d = inputs["seq_mask"].at[pos].set(0)
     else:
-      mask_1d = inputs["seq_mask"]
-    
-    seq_mask_2d = inputs["seq_mask"][:,None] * inputs["seq_mask"][None,:]
-    mask_2d = inputs["asym_id"][:,None] == inputs["asym_id"][None,:]
-    masks = {"mask_1d":mask_1d,
-             "mask_2d":jnp.where(seq_mask_2d,mask_2d,0)}
+        mask_1d = inputs["seq_mask"]
 
-    # define losses
+    seq_mask_2d = inputs["seq_mask"][:, None] * inputs["seq_mask"][None, :]
+    mask_2d = inputs["asym_id"][:, None] == inputs["asym_id"][None, :]
+    masks  = {"mask_1d": mask_1d, "mask_2d": jnp.where(seq_mask_2d, mask_2d, 0)}
     losses = {
-      "exp_res": get_exp_res_loss(outputs, mask_1d=mask_1d),
-      "plddt":   get_plddt_loss(outputs, mask_1d=mask_1d),
-      "pae":     get_pae_loss(outputs, **masks),
-      "con":     get_con_loss(inputs, outputs, opt["con"], **masks),
-      "helix":   get_helix_loss(inputs, outputs)
+        "exp_res": get_exp_res_loss(outputs, mask_1d=mask_1d),
+        "plddt": get_plddt_loss(outputs, mask_1d=mask_1d),
+        "pae": get_pae_loss(outputs, **masks),
+        "con": get_con_loss(inputs, outputs, opt["con"], **masks),
+        "helix": get_helix_loss(inputs, outputs),
     }
-
-    # define losses at interface
-    if self._args["copies"] > 1 and not self._args["repeat"]:
-      masks = {"mask_1d": mask_1d if self._args["homooligomer"] else inputs["seq_mask"],
-               "mask_2d": jnp.where(seq_mask_2d,mask_2d == False,0)}
-      losses.update({
-        "i_pae": get_pae_loss(outputs, **masks),
-        "i_con": get_con_loss(inputs, outputs, opt["i_con"], **masks),
-      })
-
+    # interface extras
+    if cfg["copies"] > 1 and not cfg["repeat"]:
+        masks_i = {
+            "mask_1d": mask_1d if cfg["homooligomer"] else inputs["seq_mask"],
+            "mask_2d": jnp.where(seq_mask_2d, mask_2d == False, 0)}
+        losses.update({
+            "i_pae": get_pae_loss(outputs, **masks_i),
+            "i_con": get_con_loss(inputs, outputs, opt["i_con"], **masks_i),
+        })
     aux["losses"].update(losses)
 
-#####################################################################################
+def _loss_fixbb_f(inputs, outputs, cfg, aux):
+    opt = inputs["opt"]
+    copies = cfg["copies"] if cfg["homooligomer"] else 1
+    aln = get_rmsd_loss(inputs, outputs, copies=copies)
+    if cfg["realign"]:
+        aux["atom_positions"] = aln["align"](aux["atom_positions"]) * aux["atom_mask"][..., None]
+    aux["losses"].update({
+        "fape"     : get_fape_loss(inputs, outputs, copies=copies, clamp=opt["fape_cutoff"]),
+        "dgram_cce": get_dgram_loss(inputs, outputs, copies=copies, aatype=inputs["aatype"]),
+        "rmsd"     : aln["rmsd"],
+    })
+    _loss_unsup_f(inputs, outputs, cfg, aux)
+
+def get_losses(protocol, inputs, outputs, cfg, aux):
+    {
+        "fixbb":        _loss_fixbb_f,
+        "binder":       _loss_binder_f,
+        "partial":      _loss_partial_f,
+        "hallucination":_loss_hallucination_f,
+    }[protocol](inputs, outputs, cfg, aux)
+
+class _af_loss:
+    def _make_loss_cfg(self):
+        return {
+            "copies": self._args["copies"],
+            "homooligomer": self._args["homooligomer"],
+            "repeat": self._args["repeat"],
+            "length": getattr(self, "_len", None),
+            "realign": self._args["realign"],
+            # binder-specific
+            "binder_len": getattr(self, "_binder_len", None),
+            "target_len": getattr(self, "_target_len", None),
+            "redesign": self._args.get("redesign", False),
+            # side-chain / partial
+            "use_sidechains": self._args.get("use_sidechains", False),
+            "use_multimer": self._args.get("use_multimer", False),
+            "sc": getattr(self, "_sc", None),
+            "sm_head_cfg": self._cfg.model.heads.structure_module,
+        }
+
+    def _loss_fixbb(self, inputs, outputs, aux):
+        get_losses("fixbb", inputs, outputs, self._make_loss_cfg(), aux)
+
+    def _loss_binder(self, inputs, outputs, aux):
+        get_losses("binder", inputs, outputs, self._make_loss_cfg(), aux)
+
+    def _loss_partial(self, inputs, outputs, aux):
+        get_losses("partial", inputs, outputs, self._make_loss_cfg(), aux)
+
+    def _loss_hallucination(self, inputs, outputs, aux):
+        get_losses("hallucination", inputs, outputs, self._make_loss_cfg(), aux)
 
 def get_plddt(outputs):
   logits = outputs["predicted_lddt"]["logits"]
@@ -211,7 +221,7 @@ def get_ptm(inputs, outputs, interface=False):
     if "asym_id" in pae:
       pae.pop("asym_id")
   return confidence.predicted_tm_score(**pae, use_jnp=True)
-  
+
 def get_dgram_bins(outputs):
   dgram = outputs["distogram"]["logits"]
   if dgram.shape[-1] == 64:
@@ -266,7 +276,7 @@ def get_con_loss(inputs, outputs, con_opt,
     y = jnp.sort(x if mask is None else jnp.where(mask,x,jnp.nan))
     k_mask = jnp.logical_and(jnp.arange(y.shape[-1]) < k, jnp.isnan(y) == False)
     return jnp.where(k_mask,y,0).sum(-1) / (k_mask.sum(-1) + 1e-8)
-  
+
   # decide on what offset to use
   if "offset" in inputs:
     offset = inputs["offset"]
@@ -287,11 +297,11 @@ def get_con_loss(inputs, outputs, con_opt,
   # mask results
   if mask_1d is None: mask_1d = jnp.ones(m.shape[0])
   if mask_1b is None: mask_1b = jnp.ones(m.shape[0])
-  
+
   if mask_2d is None:
     m = jnp.logical_and(m, mask_1b)
   else:
-    m = jnp.logical_and(m, mask_2d)  
+    m = jnp.logical_and(m, mask_2d)
 
   p = min_k(p, con_opt["num"], m)
   return min_k(p, con_opt["num_pos"], mask_1d)
@@ -299,15 +309,15 @@ def get_con_loss(inputs, outputs, con_opt,
 def _get_con_loss(dgram, dgram_bins, cutoff=None, binary=True):
   '''dgram to contacts'''
   if cutoff is None: cutoff = dgram_bins[-1]
-  bins = dgram_bins < cutoff  
+  bins = dgram_bins < cutoff
   px = jax.nn.softmax(dgram)
-  px_ = jax.nn.softmax(dgram - 1e7 * (1-bins))        
+  px_ = jax.nn.softmax(dgram - 1e7 * (1-bins))
   # binary/cateogorical cross-entropy
   con_loss_cat_ent = -(px_ * jax.nn.log_softmax(dgram)).sum(-1)
   con_loss_bin_ent = -jnp.log((bins * px + 1e-8).sum(-1))
   return jnp.where(binary, con_loss_bin_ent, con_loss_cat_ent)
 
-def get_helix_loss(inputs, outputs):  
+def get_helix_loss(inputs, outputs):
   # decide on what offset to use
   if "offset" in inputs:
     offset = inputs["offset"]
@@ -358,7 +368,7 @@ def get_dgram_loss(inputs, outputs, copies=1, aatype=None, return_mtx=False):
   def loss_fn(t,p,m):
     cce = -(t*jax.nn.log_softmax(p)).sum(-1)
     return cce, (cce*m).sum((-1,-2))/(m.sum((-1,-2))+1e-8)
-  
+
   weights = jnp.where(inputs["seq_mask"],weights,0)
   return _get_pw_loss(true, pred, loss_fn, weights=weights, copies=copies, return_mtx=return_mtx)
 
@@ -399,11 +409,11 @@ def get_fape_loss(inputs, outputs, copies=1, clamp=10.0, return_mtx=False):
 
 def _get_pw_loss(true, pred, loss_fn, weights=None, copies=1, return_mtx=False):
   length = true.shape[0]
-  
+
   if weights is None:
     weights = jnp.ones(length)
-  
-  F = {"t":true, "p":pred, "m":weights[:,None] * weights[None,:]}  
+
+  F = {"t":true, "p":pred, "m":weights[:,None] * weights[None,:]}
 
   if copies > 1:
     (L,C) = (length//copies, copies-1)
@@ -422,8 +432,8 @@ def _get_pw_loss(true, pred, loss_fn, weights=None, copies=1, return_mtx=False):
       inter = jax.tree_util.tree_map(lambda x:x.reshape(C,L,L,-1), inter)
       inter = {"t":inter["t"][:,None],        # (C,1,L,L,F)
                "p":inter["p"][None,:],        # (1,C,L,L,F)
-               "m":inter["m"][:,None,:,:,0]}  # (C,1,L,L)             
-      
+               "m":inter["m"][:,None,:,:,0]}  # (C,1,L,L)
+
       # (C,C,L,L,F) → (C,C,L,L) → (C,C) → (C) → ()
       i_mtx, i_loss = loss_fn(**inter)
       i_loss = sum([i_loss.min(i).sum() for i in [0,1]]) / 2
@@ -434,7 +444,7 @@ def _get_pw_loss(true, pred, loss_fn, weights=None, copies=1, return_mtx=False):
   else:
     mtx, loss = loss_fn(**F)
     return mtx if return_mtx else loss
-  
+
 def get_rmsd_loss(inputs, outputs, L=None, include_L=True, copies=1):
   batch = inputs["batch"]
   true = batch["all_atom_positions"][:,1]
@@ -445,7 +455,7 @@ def get_rmsd_loss(inputs, outputs, L=None, include_L=True, copies=1):
 def _get_rmsd_loss(true, pred, weights=None, L=None, include_L=True, copies=1):
   '''
   get rmsd + alignment function
-  align based on the first L positions, computed weighted rmsd using all 
+  align based on the first L positions, computed weighted rmsd using all
   positions (if include_L=True) or remaining positions (if include_L=False).
   '''
   # normalize weights
@@ -473,10 +483,10 @@ def _get_rmsd_loss(true, pred, weights=None, L=None, include_L=True, copies=1):
 
   # get alignment and rmsd functions
   (T_mu,P_mu) = ((x*W).sum(-2,keepdims=True)/W.sum((-1,-2)) for x in (T,P))
-  aln = _np_kabsch((P-P_mu)*W, T-T_mu)   
+  aln = _np_kabsch((P-P_mu)*W, T-T_mu)
   align_fn = lambda x: (x - P_mu) @ aln + T_mu
   msd_fn = lambda t,p,w: (w*jnp.square(align_fn(p)-t)).sum((-1,-2))
-  
+
   # compute rmsd
   if iL == 0:
     msd = msd_fn(true,pred,weights)
@@ -485,7 +495,7 @@ def _get_rmsd_loss(true, pred, weights=None, L=None, include_L=True, copies=1):
     iT = iT.reshape(-1,C,1,iL,3).swapaxes(0,-3)
     iP = iP.reshape(-1,1,C,iL,3).swapaxes(0,-3)
     imsd = msd_fn(iT, iP, iW.reshape(-1,C,1,iL,1).swapaxes(0,-3))
-    imsd = (imsd.min(0).sum(0) + imsd.min(1).sum(0)) / 2 
+    imsd = (imsd.min(0).sum(0) + imsd.min(1).sum(0)) / 2
     imsd = imsd.reshape(jnp.broadcast_shapes(true.shape[:-2],pred.shape[:-2]))
     msd = (imsd + msd_fn(T,P,W)) if include_L else (imsd/iW.sum((-1,-2)))
   else:
