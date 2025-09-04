@@ -94,14 +94,18 @@ class _af_design:
     for n in model_nums:
       p = self._model_params[n]
       auxs.append(self._recycle(p, num_recycles=num_recycles, backprop=backprop))
-    auxs = jax.tree_util.tree_map(lambda *x: np.stack(x), *auxs)
+    if len(auxs) > 1:
+        auxs = jax.tree_util.tree_map(lambda *x: np.stack(x), *auxs)
+        self.aux = jax.tree_util.tree_map(avg_or_first, auxs)
+    else:
+        self.aux = auxs[0]
+        auxs = jax.tree_util.tree_map(lambda x: np.array(x, ndmin=1, dtype=np.integer) if isinstance(x, int) else x[None, ...], self.aux)
 
     # update aux (average outputs)
     def avg_or_first(x):
       if np.issubdtype(x.dtype, np.integer): return x[0]
       else: return x.mean(0)
 
-    self.aux = jax.tree_util.tree_map(avg_or_first, auxs)
     self.aux["atom_positions"] = auxs["atom_positions"][0]
     self.aux["all"] = auxs
     
@@ -189,18 +193,21 @@ class _af_design:
       if mode == "first":   mask[0] = 1
       
       # gather gradients across recycles 
-      grad = []
+      grad = None
       for m in mask:        
         if m == 0:
           aux = self._single(model_params, backprop=False)
         else:
           aux = self._single(model_params, backprop)
-          grad.append(jax.tree_util.tree_map(lambda x:x*m, aux["grad"]))
+          if grad is None:
+            grad = jax.tree_util.tree_map(lambda x:x*m, aux["grad"])
+          else:
+            grad = jax.tree_util.tree_map(lambda x, g: x*m+g, aux["grad"], grad)
         self._inputs["prev"] = aux["prev"]
         if a["use_initial_atom_pos"]:
           self._inputs["initial_atom_pos"] = aux["prev"]["prev_pos"]                
 
-      aux["grad"] = jax.tree_util.tree_map(lambda *x: np.stack(x).sum(0), *grad)
+      aux["grad"] = grad
     
     aux["num_recycles"] = num_recycles
     return aux
