@@ -170,7 +170,7 @@ class design_model:
     - set get_best=False, to get the last sampled sequence
     '''
     aux = self._tmp["best"]["aux"] if (get_best and "aux" in self._tmp["best"]) else self.aux
-    x = aux["seq"]["hard"].argmax(-1)
+    x = np.array(aux["seq"]["hard"].argmax(-1))
     return ["".join([order_aa[a] for a in s]) for s in x]
   
   def get_seqs(self, get_best=True):

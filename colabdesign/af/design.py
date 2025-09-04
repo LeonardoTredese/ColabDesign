@@ -94,17 +94,17 @@ class _af_design:
     for n in model_nums:
       p = self._model_params[n]
       auxs.append(self._recycle(p, num_recycles=num_recycles, backprop=backprop))
+
+    # update aux (average outputs)
+    def avg_or_first(x):
+      if np.issubdtype(x.dtype, np.integer): return x[0]
+      else: return x.mean(0)
     if len(auxs) > 1:
         auxs = jax.tree_util.tree_map(lambda *x: np.stack(x), *auxs)
         self.aux = jax.tree_util.tree_map(avg_or_first, auxs)
     else:
         self.aux = auxs[0]
         auxs = jax.tree_util.tree_map(lambda x: np.array(x, ndmin=1, dtype=np.integer) if isinstance(x, int) else x[None, ...], self.aux)
-
-    # update aux (average outputs)
-    def avg_or_first(x):
-      if np.issubdtype(x.dtype, np.integer): return x[0]
-      else: return x.mean(0)
 
     self.aux["atom_positions"] = auxs["atom_positions"][0]
     self.aux["all"] = auxs
