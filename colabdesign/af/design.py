@@ -104,7 +104,7 @@ class _af_design:
         self.aux = jax.tree_util.tree_map(avg_or_first, auxs)
     else:
         self.aux = auxs[0]
-        auxs = jax.tree_util.tree_map(lambda x: np.array(x, ndmin=1, dtype=np.integer) if isinstance(x, int) else x[None, ...], self.aux)
+        auxs = jax.tree_util.tree_map(lambda x: np.array(x, ndmin=1, dtype=np.integer) if isinstance(x, int) else np.expand_dims(np.array(x), axis=0), self.aux)
 
     self.aux["atom_positions"] = auxs["atom_positions"][0]
     self.aux["all"] = auxs
