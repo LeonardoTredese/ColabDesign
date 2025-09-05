@@ -81,6 +81,7 @@ def _af_model_kernel(params, model_params, inputs, key, cfg, runner):
         aux["losses"].update(get_mlm_loss(outputs, mask=mask, truth=seq["pssm"]))
     for fn in callbacks["loss"]:
         aux["losses"].update(fn(inputs=inputs, outputs=outputs,
+                                cfg=cfg["loss_cfg"],
                                 opt=opt, aux=aux, seq=seq,
                                 key=keyseq(), params=params))
     for fn in callbacks["post"]:
