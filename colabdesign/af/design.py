@@ -102,12 +102,11 @@ class _af_design:
     if len(auxs) > 1:
         auxs = jax.tree_util.tree_map(lambda *x: np.stack(x), *auxs)
         self.aux = jax.tree_util.tree_map(avg_or_first, auxs)
+        self.aux["atom_positions"] = auxs["atom_positions"][0]
+        self.aux["all"] = auxs
     else:
         self.aux = auxs[0]
-        auxs = jax.tree_util.tree_map(lambda x: np.array(x, ndmin=1, dtype=np.integer) if isinstance(x, int) else np.expand_dims(np.array(x), axis=0), self.aux)
 
-    self.aux["atom_positions"] = auxs["atom_positions"][0]
-    self.aux["all"] = auxs
     
     # post-design callbacks
     for fn in (self._callbacks["design"]["post"] + to_list(callback)): fn(self)
@@ -559,7 +558,7 @@ class _af_design:
         # accept
         (current_seq,current_loss) = (mut_seq,loss)
         
-        plddt = aux["all"]["plddt"].mean(0)
+        plddt = aux["plddt"]
         plddt = plddt[self._target_len:] if self.protocol == "binder" else plddt[:self._len]
         
         if loss < best_loss:

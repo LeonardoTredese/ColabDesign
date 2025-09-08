@@ -68,7 +68,10 @@ class _af_utils:
     '''
     if aux is None:
       aux = self._tmp["best"]["aux"] if (get_best and "aux" in self._tmp["best"]) else self.aux
-    aux = aux["all"]
+
+    multi_design = "all" in aux
+    aux = aux["all"] if multi_design else aux
+
     
     p = {k:aux[k] for k in ["aatype","residue_index","atom_positions","atom_mask"]}
     p["b_factors"] = 100 * p["atom_mask"] * aux["plddt"][...,None]
@@ -82,8 +85,11 @@ class _af_utils:
       return p_str
 
     p_str = ""
-    for n in range(p["atom_positions"].shape[0]):
-      p_str += to_pdb_str(jax.tree_util.tree_map(lambda x:x[n],p), n+1)
+    if multi_design:
+        for n in range(p["atom_positions"].shape[0]):
+          p_str += to_pdb_str(jax.tree_util.tree_map(lambda x:x[n],p), n+1)
+    else:
+        p_str += to_pdb_str(p)
     p_str += "END\n"
     
     if filename is None:
@@ -104,12 +110,15 @@ class _af_utils:
     '''
     if aux is None:
       aux = self._tmp["best"]["aux"] if (get_best and "aux" in self._tmp["best"]) else self.aux
-    aux = aux["all"]    
+    multi_design = "all" in aux
+    if multi_design:
+        aux = aux["all"]
     if self.protocol in ["fixbb","binder"]:
       pos_ref = self._inputs["batch"]["all_atom_positions"][:,1].copy()
       pos_ref[(pos_ref == 0).any(-1)] = np.nan
     else:
-      pos_ref = aux["atom_positions"][0,:,1,:]
+      pos = aux["atom_positions"]
+      pos_ref = pos[0,:,1,:] if multi_design else pos[:,1,:]
 
     if traj is None: traj = self._tmp["traj"]
     sub_traj = {k:v[s:e] for k,v in traj.items()}
