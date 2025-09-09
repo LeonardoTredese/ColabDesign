@@ -129,7 +129,6 @@ class _af_design:
       pred = aatype[...,mask]
       self.aux["log"]["seqid"] = (true == pred).mean()
 
-    self.aux["log"] = to_float(self.aux["log"])
     self.aux["log"].update({"recycles":int(self.aux["num_recycles"]),
                             "models":model_nums})
     
@@ -221,7 +220,7 @@ class _af_design:
              models=models, backprop=backprop, callback=callback)
 
     # modify gradients    
-    if self.opt["norm_seq_grad"]: self._norm_seq_grad()
+    if self.opt["norm_seq_grad"]: self._norm_seq_grad(np_backend = jnp)
     self._state, self.aux["grad"] = self._optimizer(self._state, self.aux["grad"], self._params)
   
     # apply gradients

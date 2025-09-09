@@ -125,11 +125,11 @@ class design_model:
     self._params["seq"] = x
     self._inputs["bias"] = b 
 
-  def _norm_seq_grad(self):
+  def _norm_seq_grad(self, np_backend = np):
     g = self.aux["grad"]["seq"]
-    eff_L = (np.square(g).sum(-1,keepdims=True) > 0).sum(-2,keepdims=True)
-    gn = np.linalg.norm(g,axis=(-1,-2),keepdims=True)
-    self.aux["grad"]["seq"] = g * np.sqrt(eff_L) / (gn + 1e-7)  
+    eff_L = (np_backend.square(g).sum(-1,keepdims=True) > 0).sum(-2,keepdims=True)
+    gn = np_backend.linalg.norm(g,axis=(-1,-2),keepdims=True)
+    self.aux["grad"]["seq"] = g * np_backend.sqrt(eff_L) / (gn + 1e-7)  
 
   def set_optimizer(self, optimizer=None, learning_rate=None, norm_seq_grad=None, **kwargs):
     '''
