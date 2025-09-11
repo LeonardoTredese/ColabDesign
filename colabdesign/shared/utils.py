@@ -39,9 +39,12 @@ def update_dict(D, *args, **kwargs):
     if isinstance(a, dict): set_dict(D, a, override=override)
   set_dict(D, kwargs, override=override)
 
-def copy_dict(x):
+def copy_dict(x, deep=True):
   '''deepcopy dictionary'''
-  return jax.tree_util.tree_map(lambda y:y, x)
+  if deep:
+      return jax.tree_util.tree_map(lambda y:y, x)
+  else:
+      return x.copy()
 
 def to_float(x):
   '''convert to float'''
