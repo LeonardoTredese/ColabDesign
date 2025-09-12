@@ -24,8 +24,10 @@ def update_dict(D, *args, **kwargs):
             set_dict(d[k], x[k], override=override)
           elif override or d[k] is None:
             d[k] = v
-          elif isinstance(d[k],(np.ndarray,jnp.ndarray)):
+          elif isinstance(d[k],np.ndarray):
             d[k] = np.asarray(v)
+          elif isinstance(d[k],jnp.ndarray):
+            d[k] = jnp.asarray(v)
           elif isinstance(d[k], dict):
             d[k] = jax.tree_util.tree_map(lambda x: type(x)(v), d[k])
           else:
@@ -94,10 +96,13 @@ class Key():
       self.key, sub_key = jax.random.split(self.key)
       return sub_key
 
-def softmax(x, axis=-1):
-  x = x - x.max(axis,keepdims=True)
-  x = np.exp(x)
-  return x / x.sum(axis,keepdims=True)
+def softmax(x, axis=-1, use_jax=False):
+  if use_jax:
+    return jax.nn.softmax(x, axis=axis)
+  else:
+    x = x - x.max(axis,keepdims=True)
+    x = np.exp(x)
+    return x / x.sum(axis,keepdims=True)
 
 def categorical(p):
   return (p.cumsum(-1) >= np.random.uniform(size=p.shape[:-1])[..., None]).argmax(-1)

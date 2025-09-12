@@ -142,7 +142,7 @@ class _af_design:
       (loss, aux), grad = self._model["grad_fn"](*flags)
     else:
       loss, aux = self._model["fn"](*flags)
-      grad = jax.tree_util.tree_map(np.zeros_like, self._params)
+      grad = jax.tree_util.tree_map(jnp.zeros_like, self._params)
     aux.update({"loss":loss,"grad":grad})
     return aux
 
@@ -162,23 +162,23 @@ class _af_design:
       
       # intialize previous
       if "prev" not in self._inputs or a["clear_prev"]:
-        prev = {'prev_msa_first_row': np.zeros([L,256]),
-                'prev_pair': np.zeros([L,L,128])}
+        prev = {'prev_msa_first_row': jnp.zeros([L,256]),
+                'prev_pair': jnp.zeros([L,L,128])}
 
         if a["use_initial_guess"] and "batch" in self._inputs:
           prev["prev_pos"] = self._inputs["batch"]["all_atom_positions"] 
         else:
-          prev["prev_pos"] = np.zeros([L,37,3])
+          prev["prev_pos"] = jnp.zeros([L,37,3])
 
         if a["use_dgram"]:
           # TODO: add support for initial_guess + use_dgram
-          prev["prev_dgram"] = np.zeros([L,L,64])
+          prev["prev_dgram"] = jnp.zeros([L,L,64])
 
         if a["use_initial_atom_pos"]:
           if "batch" in self._inputs:
             self._inputs["initial_atom_pos"] = self._inputs["batch"]["all_atom_positions"] 
           else:
-            self._inputs["initial_atom_pos"] = np.zeros([L,37,3])              
+            self._inputs["initial_atom_pos"] = jnp.zeros([L,37,3])              
       
       self._inputs["prev"] = prev
       # decide which layers to compute gradients for
@@ -397,12 +397,12 @@ class _af_design:
 
   def _mutate(self, seq, plddt=None, logits=None, mutation_rate=1):
     '''mutate random position'''
-    seq = np.array(seq)
+    seq = jnp.array(seq)
     N,L = seq.shape
 
     # fix some positions
-    i_prob = np.ones(L) if plddt is None else np.maximum(1-plddt,0)
-    i_prob[np.isnan(i_prob)] = 0
+    i_prob = jnp.ones(L) if plddt is None else jnp.maximum(1-plddt,0)
+    i_prob[jnp.isnan(i_prob)] = 0
     if "fix_pos" in self.opt:
       if "pos" in self.opt:
         p = self.opt["pos"][self.opt["fix_pos"]]
@@ -418,10 +418,10 @@ class _af_design:
       i = np.random.choice(np.arange(L),p=i_prob/i_prob.sum())
 
       # sample amino acid
-      logits = np.array(0 if logits is None else logits)
+      logits = jnp.array(0 if logits is None else logits)
       if logits.ndim == 3: logits = logits[:,i]
       elif logits.ndim == 2: logits = logits[i]
-      a_logits = logits - np.eye(self._args["alphabet_size"])[seq[:,i]] * 1e8
+      a_logits = logits - jnp.eye(self._args["alphabet_size"])[seq[:,i]] * 1e8
       a = categorical(softmax(a_logits))
 
       # return mutant
@@ -464,11 +464,11 @@ class _af_design:
         mut_seq = self._mutate(seq=seq, plddt=plddt,
                                logits=seq_logits + self._inputs["bias"])
         aux = self.predict(seq=mut_seq, return_aux=True, model_nums=model_nums, verbose=False, **kwargs)
-        buff.append({"aux":aux, "seq":np.array(mut_seq)})
+        buff.append({"aux":aux, "seq":jnp.array(mut_seq)})
 
       # accept best
       losses = [x["aux"]["loss"] for x in buff]
-      best = buff[np.argmin(losses)]
+      best = buff[jnp.argmin(losses)]
       self.aux, seq = best["aux"], jnp.array(best["seq"])
       self.set_seq(seq=seq, bias=self._inputs["bias"])
       self._save_results(save_best=save_best, verbose=verbose)
@@ -526,7 +526,7 @@ class _af_design:
     model_flags = {k:kwargs.pop(k,None) for k in ["num_models","sample_models","models"]}
 
     # initialize
-    plddt, best_loss, current_loss = None, np.inf, np.inf 
+    plddt, best_loss, current_loss = None, jnp.inf, jnp.inf 
     current_seq = (self._params["seq"] + self._inputs["bias"]).argmax(-1)
     if seq_logits is None: seq_logits = 0
 
@@ -535,7 +535,7 @@ class _af_design:
     for i in range(steps):
 
       # update temperature
-      T = T_init * (np.exp(np.log(0.5) / half_life) ** i) 
+      T = T_init * (jnp.exp(np.log(0.5) / half_life) ** i) 
 
       # mutate sequence
       if i == 0:

@@ -119,7 +119,7 @@ class _af_prep:
     for n,x in {"rm_template":    rm_template,
                 "rm_template_seq":rm_template_seq,
                 "rm_template_sc": rm_template_sc}.items():
-      rm[n] = np.full(L,False)
+      rm[n] = jnp.full(L,False)
       if isinstance(x,str):
         rm[n][prep_pos(x,**self._pdb["idx"])["pos"]] = True
       else:
@@ -161,10 +161,10 @@ class _af_prep:
         self._lengths = [self._len] * copies
         self.opt["weights"].update({"i_pae":0.0, "i_con":1.0})
         self._args["homooligomer"] = True
-      res_idx = repeat_idx(np.arange(length), copies, offset=offset)
+      res_idx = repeat_idx(jnp.arange(length), copies, offset=offset)
     else:
       self._lengths = [self._len]
-      res_idx = np.arange(length)
+      res_idx = jnp.arange(length)
 
     # configure input features
     self._inputs = self._prep_features(num_res=sum(self._lengths), num_seq=num_seq)
@@ -220,7 +220,7 @@ class _af_prep:
     else:
       self._target_len = self._pdb["residue_index"].shape[0]
       self._binder_len = binder_len
-      res_idx = np.append(res_idx, res_idx[-1] + np.arange(binder_len) + 50)
+      res_idx = jnp.append(res_idx, res_idx[-1] + jnp.arange(binder_len) + 50)
 
     self._len = self._binder_len
     self._lengths = [self._target_len, self._binder_len]
@@ -253,13 +253,15 @@ class _af_prep:
               "rm_template_sc": {"target":rm_target_sc, "binder":rm_binder_sc}
              }
     for n,x in rm_opt.items():
-      rm[n] = np.full(L,False)
+      rm[n] = jnp.full(L,False)
       for m,y in x.items():
         if isinstance(y,str):
-          rm[n][prep_pos(y,**self._pdb["idx"])["pos"]] = True
+          rm[n] = rm[n].at[prep_pos(y,**self._pdb["idx"])["pos"]].set(True)
         else:
-          if m == "target": rm[n][:T] = y
-          if m == "binder": rm[n][T:] = y
+          if m == "target": 
+            rm[n] = rm[n].at[:T].set(y)
+          if m == "binder": 
+            rm[n] = rm[n].at[T:].set(y)
 
     # set template [opt]ions
     self.opt["template"]["rm_ic"] = rm_template_ic
@@ -298,12 +300,12 @@ class _af_prep:
 
     # feat dims
     num_seq = self._num
-    res_idx = np.arange(self._len)
+    res_idx = jnp.arange(self._len)
 
     # get [pos]itions of interests
     if pos is None:
-      self.opt["pos"] = self._pdb["pos"] = np.arange(self._pdb["len"])
-      self._pos_info = {"length":np.array([self._pdb["len"]]), "pos":self._pdb["pos"]}
+      self.opt["pos"] = self._pdb["pos"] = jnp.arange(self._pdb["len"])
+      self._pos_info = {"length":jnp.array([self._pdb["len"]]), "pos":self._pdb["pos"]}
     else:
       self._pos_info = prep_pos(pos, **self._pdb["idx"])
       self.opt["pos"] = self._pdb["pos"] = self._pos_info["pos"]
@@ -331,7 +333,7 @@ class _af_prep:
         block_diag = not self._args["use_multimer"]
 
         num_seq = (self._num * copies + 1) if block_diag else self._num
-        res_idx = repeat_idx(np.arange(self._len), copies)
+        res_idx = repeat_idx(jnp.arange(self._len), copies)
 
         self.opt["weights"].update({"i_pae":0.0, "i_con":1.0})
 
@@ -354,7 +356,7 @@ class _af_prep:
       self._sc = {"batch":prep_inputs.make_atom14_positions(self._inputs["batch"]),
                   "pos":get_sc_pos(self._wt_aatype, atoms_to_exclude)}
       self.opt["weights"].update({"sc_rmsd":0.1, "sc_fape":0.1})
-      self.opt["fix_pos"] = np.arange(self.opt["pos"].shape[0])
+      self.opt["fix_pos"] = jnp.arange(self.opt["pos"].shape[0])
       self._wt_aatype_sub = self._wt_aatype
 
     elif fix_pos is not None and fix_pos != "":
@@ -365,11 +367,11 @@ class _af_prep:
         if i in pos:
           sub_i.append(i)
           sub_fix_pos.append(pos.index(i))
-      self.opt["fix_pos"] = np.array(sub_fix_pos)
+      self.opt["fix_pos"] = jnp.array(sub_fix_pos)
       self._wt_aatype_sub = self._pdb["batch"]["aatype"][sub_i]
 
     elif kwargs.pop("fix_seq",False):
-      self.opt["fix_pos"] = np.arange(self.opt["pos"].shape[0])
+      self.opt["fix_pos"] = jnp.arange(self.opt["pos"].shape[0])
       self._wt_aatype_sub = self._wt_aatype
 
     self.opt["template"].update({"rm_ic":rm_template_ic})
@@ -383,11 +385,11 @@ class _af_prep:
 # utils
 #######################
 def repeat_idx(idx, copies=1, offset=50):
-  idx_offset = np.repeat(np.cumsum([0]+[idx[-1]+offset]*(copies-1)),len(idx))
-  return np.tile(idx,copies) + idx_offset
+  idx_offset = jnp.repeat(jnp.cumsum([0]+[idx[-1]+offset]*(copies-1)),len(idx))
+  return jnp.tile(idx,copies) + idx_offset
 
 def repeat_pos(pos, copies, length):
-  return (np.repeat(pos,copies).reshape(-1,copies) + np.arange(copies) * length).T.flatten()
+  return (jnp.repeat(pos,copies).reshape(-1,copies) + jnp.arange(copies) * length).T.flatten()
 
 def prep_pdb(pdb_filename, chain=None,
              offsets=None, lengths=None,
@@ -401,8 +403,8 @@ def prep_pdb(pdb_filename, chain=None,
     atoms = {k:p[...,atom_idx[k],:] for k in ["N","CA","C"]}
     cb = atom_idx["CB"]
     cb_atoms = _np_get_cb(**atoms, use_jax=False)
-    cb_mask = np.prod([m[...,atom_idx[k]] for k in ["N","CA","C"]],0)
-    batch["all_atom_positions"][...,cb,:] = np.where(m[:,cb,None], p[:,cb,:], cb_atoms)
+    cb_mask = jnp.prod(jnp.array([m[...,atom_idx[k]] for k in ["N","CA","C"]]),0)
+    batch["all_atom_positions"][...,cb,:] = jnp.where(m[:,cb,None], p[:,cb,:], cb_atoms)
     batch["all_atom_mask"][...,cb] = (m[:,cb] + cb_mask) > 0
     return {"atoms":batch["all_atom_positions"][:,cb],"mask":cb_mask}
 
@@ -439,7 +441,7 @@ def prep_pdb(pdb_filename, chain=None,
       length = (r.max()+1) if lengths is None else (lengths[n] if isinstance(lengths,list) else lengths)
       def scatter(x, value=0):
         shape = (length,) + x.shape[1:]
-        y = np.full(shape, value, dtype=x.dtype)
+        y = jnp.full(shape, value, dtype=x.dtype)
         y[r] = x
         return y
 
@@ -448,7 +450,7 @@ def prep_pdb(pdb_filename, chain=None,
                "all_atom_mask":scatter(batch["all_atom_mask"]),
                "residue_index":scatter(batch["residue_index"],-1)}
 
-      residue_index = np.arange(length) + last
+      residue_index = jnp.arange(length) + last
 
     last = residue_index[-1] + 50
     o.append({"batch":batch,
@@ -460,11 +462,10 @@ def prep_pdb(pdb_filename, chain=None,
     full_lengths.append(len(residue_index))
 
   # concatenate chains
-  o = jax.tree_util.tree_map(lambda *x:np.concatenate(x,0),*o)
-
+  o = jax.tree_util.tree_map(lambda *x: jnp.concatenate(x,0),*o)
   # save original residue and chain index
-  o["idx"] = {"residue":np.concatenate(residue_idx), "chain":np.concatenate(chain_idx)}
-  o["lengths"] = full_lengths
+  o["idx"] = {"residue": jnp.concatenate(jnp.array(residue_idx)), "chain": np.concatenate(chain_idx)}
+  o["lengths"] = jnp.array(full_lengths)
   return o
 
 def make_fixed_size(feat, num_res, num_seq=1, num_templates=1):
@@ -488,7 +489,7 @@ def make_fixed_size(feat, num_res, num_seq=1, num_templates=1):
           f'{shape} vs {schema}')
       pad_size = [pad_size_map.get(s2, None) or s1 for (s1, s2) in zip(shape, schema)]
       padding = [(0, p - v.shape[i]) for i, p in enumerate(pad_size)]
-      feat[k] = np.pad(v, padding)
+      feat[k] = jnp.pad(v, padding)
   return feat
 
 def get_sc_pos(aa_ident, atoms_to_exclude=None):
@@ -520,11 +521,11 @@ def get_sc_pos(aa_ident, atoms_to_exclude=None):
         N_non_amb.append(n)
       N.append(n)
 
-  pos, pos_alt = np.asarray(pos), np.asarray(pos_alt)
+  pos, pos_alt = jnp.asarray(pos), jnp.asarray(pos_alt)
   non_amb = pos == pos_alt
-  N, N_non_amb = np.asarray(N), np.asarray(N_non_amb)
-  w = np.array([1/(n == N).sum() for n in N])
-  w_na = np.array([1/(n == N_non_amb).sum() for n in N_non_amb])
+  N, N_non_amb = jnp.asarray(N), jnp.asarray(N_non_amb)
+  w = jnp.array([1/(n == N).sum() for n in N])
+  w_na = jnp.array([1/(n == N_non_amb).sum() for n in N_non_amb])
   w, w_na = w/w.sum(), w_na/w_na.sum()
   return {"pos":pos, "pos_alt":pos_alt, "non_amb":non_amb,
           "weight":w, "weight_non_amb":w_na[:,None]}
@@ -534,48 +535,48 @@ def prep_input_features(L, N=1, T=1, eN=1):
   given [L]ength, [N]umber of sequences and number of [T]emplates
   return dictionary of blank features
   '''
-  inputs = {'aatype': np.zeros(L,int),
-            'target_feat': np.zeros((L,20)),
-            'msa_feat': np.zeros((N,L,49)),
+  inputs = {'aatype': jnp.zeros(L,int),
+            'target_feat': jnp.zeros((L,20)),
+            'msa_feat': jnp.zeros((N,L,49)),
             # 23 = one_hot -> (20, UNK, GAP, MASK)
             # 1  = has deletion
             # 1  = deletion_value
             # 23 = profile
             # 1  = deletion_mean_value
 
-            'seq_mask': np.ones(L),
-            'msa_mask': np.ones((N,L)),
-            'msa_row_mask': np.ones(N),
-            'atom14_atom_exists': np.zeros((L,14)),
-            'atom37_atom_exists': np.zeros((L,37)),
-            'residx_atom14_to_atom37': np.zeros((L,14),int),
-            'residx_atom37_to_atom14': np.zeros((L,37),int),
-            'residue_index': np.arange(L),
-            'extra_deletion_value': np.zeros((eN,L)),
-            'extra_has_deletion': np.zeros((eN,L)),
-            'extra_msa': np.zeros((eN,L),int),
-            'extra_msa_mask': np.zeros((eN,L)),
-            'extra_msa_row_mask': np.zeros(eN),
+            'seq_mask': jnp.ones(L),
+            'msa_mask': jnp.ones((N,L)),
+            'msa_row_mask': jnp.ones(N),
+            'atom14_atom_exists': jnp.zeros((L,14)),
+            'atom37_atom_exists': jnp.zeros((L,37)),
+            'residx_atom14_to_atom37': jnp.zeros((L,14),int),
+            'residx_atom37_to_atom14': jnp.zeros((L,37),int),
+            'residue_index': jnp.arange(L),
+            'extra_deletion_value': jnp.zeros((eN,L)),
+            'extra_has_deletion': jnp.zeros((eN,L)),
+            'extra_msa': jnp.zeros((eN,L),int),
+            'extra_msa_mask': jnp.zeros((eN,L)),
+            'extra_msa_row_mask': jnp.zeros(eN),
 
             # for template inputs
-            'template_aatype': np.zeros((T,L),int),
-            'template_all_atom_mask': np.zeros((T,L,37)),
-            'template_all_atom_positions': np.zeros((T,L,37,3)),
-            'template_mask': np.zeros(T),
-            'template_pseudo_beta': np.zeros((T,L,3)),
-            'template_pseudo_beta_mask': np.zeros((T,L)),
+            'template_aatype': jnp.zeros((T,L),int),
+            'template_all_atom_mask': jnp.zeros((T,L,37)),
+            'template_all_atom_positions': jnp.zeros((T,L,37,3)),
+            'template_mask': jnp.zeros(T),
+            'template_pseudo_beta': jnp.zeros((T,L,3)),
+            'template_pseudo_beta_mask': jnp.zeros((T,L)),
 
             # for alphafold-multimer
-            'asym_id': np.zeros(L),
-            'sym_id': np.zeros(L),
-            'entity_id': np.zeros(L),
-            'all_atom_positions': np.zeros((N,37,3))}
+            'asym_id': jnp.zeros(L),
+            'sym_id': jnp.zeros(L),
+            'entity_id': jnp.zeros(L),
+            'all_atom_positions': jnp.zeros((N,37,3))}
   return inputs
 
 def get_multi_id(lengths, homooligomer=False):
   '''set info for alphafold-multimer'''
   i = np.concatenate([[n]*l for n,l in enumerate(lengths)])
   if homooligomer:
-    return {"asym_id":i, "sym_id":i, "entity_id":np.zeros_like(i)}
+    return {"asym_id":i, "sym_id":i, "entity_id": jnp.zeros_like(i)}
   else:
     return {"asym_id":i, "sym_id":i, "entity_id":i}
