@@ -402,20 +402,20 @@ class _af_design:
 
     # fix some positions
     i_prob = jnp.ones(L) if plddt is None else jnp.maximum(1-plddt,0)
-    i_prob[jnp.isnan(i_prob)] = 0
+    i_prob = i_prob.at[jnp.isnan(i_prob)].set(0)
     if "fix_pos" in self.opt:
       if "pos" in self.opt:
         p = self.opt["pos"][self.opt["fix_pos"]]
-        seq[...,p] = self._wt_aatype_sub
+        seq = seq.at[...,p].set(self._wt_aatype_sub)
       else:
         p = self.opt["fix_pos"]
-        seq[...,p] = self._wt_aatype[...,p]
-      i_prob[p] = 0
+        seq = seq.at[...,p].set(self._wt_aatype[...,p])
+      i_prob = i_prob.at[p].set(0)
     
     for m in range(mutation_rate):
       # sample position
       # https://www.biorxiv.org/content/10.1101/2021.08.24.457549v1
-      i = np.random.choice(np.arange(L),p=i_prob/i_prob.sum())
+      i = categorical(i_prob)
 
       # sample amino acid
       logits = jnp.array(0 if logits is None else logits)
@@ -425,7 +425,7 @@ class _af_design:
       a = categorical(softmax(a_logits))
 
       # return mutant
-      seq[:,i] = a
+      seq = seq.at[:,i].set(a)
     
     return seq
 
@@ -467,7 +467,7 @@ class _af_design:
         buff.append({"aux":aux, "seq":jnp.array(mut_seq)})
 
       # accept best
-      losses = [x["aux"]["loss"] for x in buff]
+      losses = jnp.array([x["aux"]["loss"] for x in buff])
       best = buff[jnp.argmin(losses)]
       self.aux, seq = best["aux"], jnp.array(best["seq"])
       self.set_seq(seq=seq, bias=self._inputs["bias"])
@@ -480,6 +480,7 @@ class _af_design:
 
   def design_pssm_semigreedy(self, soft_iters=300, hard_iters=32, tries=10, e_tries=None,
                              ramp_recycles=True, ramp_models=True, **kwargs):
+
 
     verbose = kwargs.get("verbose",1)
 

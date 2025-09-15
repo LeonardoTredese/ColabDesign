@@ -59,7 +59,7 @@ class _af_utils:
 
   def get_loss(self, x="loss"):
     '''output the loss (for entire trajectory)'''
-    return np.array([loss[x] for loss in self._tmp["log"]])
+    return jnp.array([loss[x] for loss in self._tmp["log"]])
 
   def save_pdb(self, filename=None, get_best=True, renum_pdb=True, aux=None):
     '''
@@ -114,8 +114,8 @@ class _af_utils:
     if multi_design:
         aux = aux["all"]
     if self.protocol in ["fixbb","binder"]:
-      pos_ref = self._inputs["batch"]["all_atom_positions"][:,1].copy()
-      pos_ref[(pos_ref == 0).any(-1)] = np.nan
+      pos_ref = self._inputs["batch"]["all_atom_positions"][:,1]
+      pos_ref = pos_ref.at[(pos_ref == 0).any(-1)].set(jnp.nan)
     else:
       pos = aux["atom_positions"]
       pos_ref = pos[0,:,1,:] if multi_design else pos[:,1,:]

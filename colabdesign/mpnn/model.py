@@ -184,7 +184,7 @@ class mk_mpnn_model():
 
   def _get_score(self, I, O):
     ''' logits to score/sequence_recovery '''
-    mask = I["mask"].copy()
+    mask = np.array(I["mask"])
     if "fix_pos" in I:
       mask[I["fix_pos"]] = 0
 

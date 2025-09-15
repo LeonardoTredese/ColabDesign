@@ -121,9 +121,9 @@ class _af_prep:
                 "rm_template_sc": rm_template_sc}.items():
       rm[n] = jnp.full(L,False)
       if isinstance(x,str):
-        rm[n][prep_pos(x,**self._pdb["idx"])["pos"]] = True
+        rm[n] = rm[n].at[prep_pos(x,**self._pdb["idx"])["pos"]].set(True)
       else:
-        rm[n][:] = x
+        rm[n] = rm[n].at[:].set(x)
     self.opt["template"]["rm_ic"] = rm_template_ic
     self._inputs.update(rm)
 
@@ -356,7 +356,7 @@ class _af_prep:
       self._sc = {"batch":prep_inputs.make_atom14_positions(self._inputs["batch"]),
                   "pos":get_sc_pos(self._wt_aatype, atoms_to_exclude)}
       self.opt["weights"].update({"sc_rmsd":0.1, "sc_fape":0.1})
-      self.opt["fix_pos"] = jnp.arange(self.opt["pos"].shape[0])
+      self.opt["fix_pos"] = np.arange(self.opt["pos"].shape[0])
       self._wt_aatype_sub = self._wt_aatype
 
     elif fix_pos is not None and fix_pos != "":
@@ -367,11 +367,11 @@ class _af_prep:
         if i in pos:
           sub_i.append(i)
           sub_fix_pos.append(pos.index(i))
-      self.opt["fix_pos"] = jnp.array(sub_fix_pos)
+      self.opt["fix_pos"] = np.array(sub_fix_pos)
       self._wt_aatype_sub = self._pdb["batch"]["aatype"][sub_i]
 
     elif kwargs.pop("fix_seq",False):
-      self.opt["fix_pos"] = jnp.arange(self.opt["pos"].shape[0])
+      self.opt["fix_pos"] = np.arange(self.opt["pos"].shape[0])
       self._wt_aatype_sub = self._wt_aatype
 
     self.opt["template"].update({"rm_ic":rm_template_ic})
@@ -441,8 +441,7 @@ def prep_pdb(pdb_filename, chain=None,
       length = (r.max()+1) if lengths is None else (lengths[n] if isinstance(lengths,list) else lengths)
       def scatter(x, value=0):
         shape = (length,) + x.shape[1:]
-        y = jnp.full(shape, value, dtype=x.dtype)
-        y[r] = x
+        y = jnp.full(shape, value, dtype=x.dtype).at[r].set(x)
         return y
 
       batch = {"aatype":scatter(batch["aatype"],-1),
@@ -464,8 +463,8 @@ def prep_pdb(pdb_filename, chain=None,
   # concatenate chains
   o = jax.tree_util.tree_map(lambda *x: jnp.concatenate(x,0),*o)
   # save original residue and chain index
-  o["idx"] = {"residue": jnp.concatenate(jnp.array(residue_idx)), "chain": np.concatenate(chain_idx)}
-  o["lengths"] = jnp.array(full_lengths)
+  o["idx"] = {"residue": np.concatenate(residue_idx), "chain": np.concatenate(chain_idx)}
+  o["lengths"] = full_lengths
   return o
 
 def make_fixed_size(feat, num_res, num_seq=1, num_templates=1):
